@@ -41,10 +41,16 @@ extern "C" {
 #include "quicly/maxsender.h"
 
 #ifndef QUICLY_DEBUG
-#define QUICLY_DEBUG 0
+#define QUICLY_DEBUG 5
 #endif
 
 /* invariants! */
+#define QUICLY_EPOCH_INITIAL 0
+#define QUICLY_EPOCH_0RTT 1
+#define QUICLY_EPOCH_HANDSHAKE 2
+#define QUICLY_EPOCH_1RTT 3
+
+
 #define QUICLY_LONG_HEADER_BIT 0x80
 #define QUICLY_PACKET_IS_LONG_HEADER(first_byte) (((first_byte)&QUICLY_LONG_HEADER_BIT) != 0)
 
@@ -53,6 +59,9 @@ extern "C" {
 #define QUICLY_MAX_CID_LEN 18
 #define QUICLY_STATELESS_RESET_TOKEN_LEN 16
 #define QUICLY_STATELESS_RESET_PACKET_MIN_LEN 39
+
+#define QUICLY_MAX_PN_SIZE 4  /* maximum defined by the RFC used for calculating header protection sampling offset */
+#define QUICLY_SEND_PN_SIZE 2 /* size of PN used for sending */
 
 typedef struct st_quicly_datagram_t {
     ptls_iovec_t data;
@@ -836,6 +845,26 @@ quicly_datagram_t *quicly_send_stateless_reset(quicly_context_t *ctx, struct soc
  *
  */
 int quicly_receive(quicly_conn_t *conn, quicly_decoded_packet_t *packet);
+
+/**
+ *
+ */
+struct quicly_receive_ctx {
+    quicly_conn_t *conn;
+    quicly_decoded_packet_t *packet;
+    ptls_cipher_context_t *header_protection;
+    ptls_aead_context_t **aead;
+    struct st_quicly_pn_space_t **space;
+    size_t epoch;
+    ptls_iovec_t payload;
+    uint64_t pn;
+
+    size_t aead_off;
+    size_t ptlen;
+};
+
+int quicly_receive_begin(struct quicly_receive_ctx *ctx);
+int quicly_receive_end(struct quicly_receive_ctx *ctx);
 /**
  *
  */
