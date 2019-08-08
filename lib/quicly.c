@@ -4367,7 +4367,7 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
             }
             ctx->aead = &ctx->conn->initial->cipher.ingress.aead;
             ctx->space = (void *)&ctx->conn->initial;
-            ctx->epoch = 0;
+            ctx->epoch = QUICLY_EPOCH_INITIAL;
             break;
         case QUICLY_PACKET_TYPE_HANDSHAKE:
             fprintf(stderr, "QUICLY_PACKET_TYPE_HANDSHAKE\n");
@@ -4377,7 +4377,7 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
             }
             ctx->aead = &ctx->conn->handshake->cipher.ingress.aead;
             ctx->space = (void *)&ctx->conn->handshake;
-            ctx->epoch = 2;
+            ctx->epoch = QUICLY_EPOCH_HANDSHAKE;
             break;
         case QUICLY_PACKET_TYPE_0RTT:
             fprintf(stderr, "QUICLY_PACKET_TYPE_0RTT\n");
@@ -4392,7 +4392,7 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
             }
             ctx->aead = &ctx->conn->application->cipher.ingress.aead[0];
             ctx->space = (void *)&ctx->conn->application;
-            ctx->epoch = 1;
+            ctx->epoch = QUICLY_EPOCH_0RTT;
             break;
         default:
             ret = QUICLY_ERROR_PACKET_IGNORED;
@@ -4408,7 +4408,7 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
         }
         ctx->aead = ctx->conn->application->cipher.ingress.aead;
         ctx->space = (void *)&ctx->conn->application;
-        ctx->epoch = 3;
+        ctx->epoch = QUICLY_EPOCH_1RTT;
     }
 
     if (decrypt_packet_begin(ctx->header_protection, ctx->aead, &(*ctx->space)->next_expected_packet_number, ctx->packet, &ctx->pn, ctx)) {
@@ -4463,9 +4463,19 @@ int quicly_receive_end(struct quicly_receive_ctx *ctx)
 
     if (ctx->conn->super.state == QUICLY_STATE_FIRSTFLIGHT)
         ctx->conn->super.state = QUICLY_STATE_CONNECTED;
-
     ctx->conn->super.stats.num_packets.received += 1;
     ctx->conn->super.stats.num_bytes.received += ctx->packet->octets.len;
+
+        /* state updates, that are triggered by the receipt of a packet */
+    if (ctx->epoch == QUICLY_EPOCH_HANDSHAKE && ctx->conn->initial != NULL) {
+        /* Discard Initial space before processing the payload of the Handshake packet to avoid the chance of an ACK frame included
+         * in the Handshake packet setting a loss timer for the Initial packet. */
+        if ((ret = discard_initial_context(ctx->conn)) != 0)
+            goto Exit;
+        update_loss_alarm(ctx->conn);
+        ctx->conn->super.peer.address_validation.validated = 1;
+    }
+
     if ((ret = handle_payload(ctx->conn, ctx->epoch, ctx->payload.base, ctx->payload.len, &offending_frame_type, &is_ack_only)) !=
         0)
         goto Exit;
@@ -4484,18 +4494,13 @@ int quicly_receive_end(struct quicly_receive_ctx *ctx)
         }
         break;
     case QUICLY_EPOCH_HANDSHAKE:
-        if (ctx->conn->initial != NULL && !quicly_is_client(ctx->conn)) {
-            if ((ret = discard_initial_context(ctx->conn)) != 0)
-                goto Exit;
-            update_loss_alarm(ctx->conn);
-        }
         /* schedule the timer to discard contexts related to the handshake if we have received all handshake messages and all the
          * messages we sent have been acked */
         if (!ctx->conn->crypto.handshake_scheduled_for_discard && ptls_handshake_is_complete(ctx->conn->crypto.tls)) {
             quicly_stream_t *stream = quicly_get_stream(ctx->conn, -(quicly_stream_id_t)(1 + 2));
             assert(stream != NULL);
             quicly_streambuf_t *buf = stream->data;
-            if (buf->egress.buf.off == 0) {
+            if (buf->egress.vecs.size == 0) {
                 if ((ret = quicly_sentmap_prepare(&ctx->conn->egress.sentmap, ctx->conn->egress.packet_number, now,
                                                   QUICLY_EPOCH_HANDSHAKE)) != 0)
                     goto Exit;
@@ -4508,7 +4513,6 @@ int quicly_receive_end(struct quicly_receive_ctx *ctx)
                 ctx->conn->crypto.handshake_scheduled_for_discard = 1;
             }
         }
-        ctx->conn->super.peer.address_validation.validated = 1;
         break;
     case QUICLY_EPOCH_1RTT:
         if (!is_ack_only && should_send_max_data(ctx->conn))
