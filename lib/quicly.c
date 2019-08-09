@@ -1736,7 +1736,7 @@ static ptls_iovec_t decrypt_packet(ptls_cipher_context_t *header_protection, ptl
     *pn = quicly_determine_packet_number(pnbits, pnlen * 8, *next_expected_pn);
     size_t aead_off = packet->encrypted_off + pnlen, ptlen;
     if ((ptlen = ptls_aead_decrypt(aead[aead_index], packet->octets.base + aead_off, packet->octets.base + aead_off,
-                                   packet->octets.len - aead_off, *pn, packet->octets.base, aead_off)) == SIZE_MAX) {
+                                        packet->octets.len - aead_off, *pn, packet->octets.base, aead_off)) == SIZE_MAX) {
         if (QUICLY_DEBUG)
             fprintf(stderr, "%s: aead decryption failure (pn: %" PRIu64 ")\n", __FUNCTION__, *pn);
         goto Error;
@@ -1799,7 +1799,7 @@ static int decrypt_packet_begin(ptls_cipher_context_t *header_protection, ptls_a
     *pn = quicly_determine_packet_number(pnbits, pnlen * 8, *next_expected_pn);
     rcv_ctx->aead_off = packet->encrypted_off + pnlen;
     if ((rcv_ctx->ptlen =
-             ptls_aead_decrypt(aead[aead_index], packet->octets.base + rcv_ctx->aead_off, packet->octets.base + rcv_ctx->aead_off,
+             ptls_aead_decrypt_push(aead[aead_index], packet->octets.base + rcv_ctx->aead_off, packet->octets.base + rcv_ctx->aead_off,
                                packet->octets.len - rcv_ctx->aead_off, *pn, packet->octets.base, rcv_ctx->aead_off)) == SIZE_MAX) {
         if (QUICLY_DEBUG)
             fprintf(stderr, "%s: aead decryption failure (pn: %" PRIu64 ")\n", __FUNCTION__, *pn);
@@ -1823,11 +1823,11 @@ static ptls_iovec_t decrypt_packet_end(ptls_cipher_context_t *header_protection,
         goto Error;
     }
 
-    if (QUICLY_DEBUG) {
-        char *payload_hex = quicly_hexdump(packet->octets.base + rcv_ctx->aead_off, rcv_ctx->ptlen, 4);
-        fprintf(stderr, "%s: AEAD payload:\n%s", __FUNCTION__, payload_hex);
-        free(payload_hex);
-    }
+    // if (QUICLY_DEBUG) {
+    //     char *payload_hex = quicly_hexdump(packet->octets.base + rcv_ctx->aead_off, rcv_ctx->ptlen, 4);
+    //     fprintf(stderr, "%s: AEAD payload:\n%s", __FUNCTION__, payload_hex);
+    //     free(payload_hex);
+    // }
 
     if (*next_expected_pn <= *pn)
         *next_expected_pn = *pn + 1;
@@ -2166,11 +2166,6 @@ static int commit_send_packet(quicly_conn_t *conn, quicly_send_context_t *s, int
         size_t mask_size = 1 + QUICLY_SEND_PN_SIZE;
         uint8_t *hpmask = (uint8_t *)malloc(mask_size);
         memset(hpmask, 0, mask_size);
-
-        // ptls_cipher_encrypt_push(s->target.cipher->header_protection,
-        //                          s->dst_payload_from - QUICLY_SEND_PN_SIZE + QUICLY_MAX_PN_SIZE, NULL, NULL, mask_size,
-        //                          s->target.first_byte_at, s->dst_payload_from);
-
         ptls_cipher_encrypt_push(s->target.cipher->header_protection,
                                  s->dst_payload_from - QUICLY_SEND_PN_SIZE + QUICLY_MAX_PN_SIZE, hpmask, hpmask, mask_size,
                                  s->target.first_byte_at, s->dst_payload_from);
