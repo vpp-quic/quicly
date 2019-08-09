@@ -63,7 +63,6 @@
 #define QUICLY_TRANSPORT_PARAMETER_ID_DISABLE_MIGRATION 12
 #define QUICLY_TRANSPORT_PARAMETER_ID_PREFERRED_ADDRESS 13
 
-
 #define QUICLY_MAX_TOKEN_LEN 512 /* maximum length of token that we would accept */
 
 /**
@@ -1714,9 +1713,8 @@ static ptls_iovec_t decrypt_packet(ptls_cipher_context_t *header_protection, ptl
     /* decipher the header protection, as well as obtaining pnbits, pnlen */
     if (encrypted_len < header_protection->algo->iv_size + QUICLY_MAX_PN_SIZE)
         goto Error;
-    // ptls_cipher_init(header_protection, packet->octets.base + packet->encrypted_off + QUICLY_MAX_PN_SIZE);
-    ptls_cipher_init_and_decrypt(header_protection, packet->octets.base + packet->encrypted_off + QUICLY_MAX_PN_SIZE, hpmask,
-                                 hpmask, sizeof(hpmask), NULL, NULL);
+    ptls_cipher_init(header_protection, packet->octets.base + packet->encrypted_off + QUICLY_MAX_PN_SIZE);
+    ptls_cipher_encrypt(header_protection, hpmask, hpmask, sizeof(hpmask));
     packet->octets.base[0] ^= hpmask[0] & (QUICLY_PACKET_IS_LONG_HEADER(packet->octets.base[0]) ? 0xf : 0x1f);
     pnlen = (packet->octets.base[0] & 0x3) + 1;
     for (i = 0; i != pnlen; ++i) {
@@ -1738,7 +1736,7 @@ static ptls_iovec_t decrypt_packet(ptls_cipher_context_t *header_protection, ptl
     *pn = quicly_determine_packet_number(pnbits, pnlen * 8, *next_expected_pn);
     size_t aead_off = packet->encrypted_off + pnlen, ptlen;
     if ((ptlen = ptls_aead_decrypt(aead[aead_index], packet->octets.base + aead_off, packet->octets.base + aead_off,
-                                   packet->octets.len - aead_off, *pn, packet->octets.base, aead_off, 0)) == SIZE_MAX) {
+                                   packet->octets.len - aead_off, *pn, packet->octets.base, aead_off)) == SIZE_MAX) {
         if (QUICLY_DEBUG)
             fprintf(stderr, "%s: aead decryption failure (pn: %" PRIu64 ")\n", __FUNCTION__, *pn);
         goto Error;
@@ -1778,9 +1776,8 @@ static int decrypt_packet_begin(ptls_cipher_context_t *header_protection, ptls_a
     /* decipher the header protection, as well as obtaining pnbits, pnlen */
     if (encrypted_len < header_protection->algo->iv_size + QUICLY_MAX_PN_SIZE)
         goto Error;
-    // ptls_cipher_init(header_protection, packet->octets.base + packet->encrypted_off + QUICLY_MAX_PN_SIZE);
-    ptls_cipher_init_and_decrypt(header_protection, packet->octets.base + packet->encrypted_off + QUICLY_MAX_PN_SIZE, hpmask,
-                                 hpmask, sizeof(hpmask), NULL, NULL);
+    ptls_cipher_init(header_protection, packet->octets.base + packet->encrypted_off + QUICLY_MAX_PN_SIZE);
+    ptls_cipher_encrypt(header_protection, hpmask, hpmask, sizeof(hpmask));
     packet->octets.base[0] ^= hpmask[0] & (QUICLY_PACKET_IS_LONG_HEADER(packet->octets.base[0]) ? 0xf : 0x1f);
     pnlen = (packet->octets.base[0] & 0x3) + 1;
     for (i = 0; i != pnlen; ++i) {
@@ -1803,7 +1800,7 @@ static int decrypt_packet_begin(ptls_cipher_context_t *header_protection, ptls_a
     rcv_ctx->aead_off = packet->encrypted_off + pnlen;
     if ((rcv_ctx->ptlen =
              ptls_aead_decrypt(aead[aead_index], packet->octets.base + rcv_ctx->aead_off, packet->octets.base + rcv_ctx->aead_off,
-                               packet->octets.len - rcv_ctx->aead_off, *pn, packet->octets.base, rcv_ctx->aead_off, 1)) == SIZE_MAX) {
+                               packet->octets.len - rcv_ctx->aead_off, *pn, packet->octets.base, rcv_ctx->aead_off)) == SIZE_MAX) {
         if (QUICLY_DEBUG)
             fprintf(stderr, "%s: aead decryption failure (pn: %" PRIu64 ")\n", __FUNCTION__, *pn);
         goto Error;
@@ -2152,23 +2149,31 @@ static int commit_send_packet(quicly_conn_t *conn, quicly_send_context_t *s, int
     }
     quicly_encode16(s->dst_payload_from - QUICLY_SEND_PN_SIZE, (uint16_t)conn->egress.packet_number);
 
-    s->dst = s->dst_payload_from + ptls_aead_encrypt(s->target.cipher->aead, s->dst_payload_from, s->dst_payload_from,
-                                                     s->dst - s->dst_payload_from, conn->egress.packet_number,
-                                                     s->target.first_byte_at, s->dst_payload_from - s->target.first_byte_at);
+    s->dst = s->dst_payload_from + ptls_aead_encrypt_push(s->target.cipher->aead, s->dst_payload_from, s->dst_payload_from,
+                                                          s->dst - s->dst_payload_from, conn->egress.packet_number,
+                                                          s->target.first_byte_at, s->dst_payload_from - s->target.first_byte_at);
 
     { /* apply header protection */
+        // uint8_t hpmask[1 + QUICLY_SEND_PN_SIZE] = {0};
+        // ptls_cipher_init(s->target.cipher->header_protection, s->dst_payload_from - QUICLY_SEND_PN_SIZE + QUICLY_MAX_PN_SIZE);
+        // ptls_cipher_encrypt(s->target.cipher->header_protection, hpmask, hpmask, sizeof(hpmask));
+
+        // *s->target.first_byte_at ^= hpmask[0] & (QUICLY_PACKET_IS_LONG_HEADER(*s->target.first_byte_at) ? 0xf : 0x1f);
+        // size_t i;
+        // for (i = 0; i != QUICLY_SEND_PN_SIZE; ++i)
+        //     s->dst_payload_from[i - QUICLY_SEND_PN_SIZE] ^= hpmask[i + 1];
+
         size_t mask_size = 1 + QUICLY_SEND_PN_SIZE;
         uint8_t *hpmask = (uint8_t *)malloc(mask_size);
         memset(hpmask, 0, mask_size);
 
-        ptls_cipher_init_and_encrypt(s->target.cipher->header_protection,
-                                     s->dst_payload_from - QUICLY_SEND_PN_SIZE + QUICLY_MAX_PN_SIZE, hpmask, hpmask, mask_size,
-                                     s->target.first_byte_at, s->dst_payload_from);
-        // *s->target.first_byte_at ^= hpmask[0] & (QUICLY_PACKET_IS_LONG_HEADER(*s->target.first_byte_at) ? 0xf : 0x1f);
+        // ptls_cipher_encrypt_push(s->target.cipher->header_protection,
+        //                          s->dst_payload_from - QUICLY_SEND_PN_SIZE + QUICLY_MAX_PN_SIZE, NULL, NULL, mask_size,
+        //                          s->target.first_byte_at, s->dst_payload_from);
 
-        // size_t i;
-        // for (i = 0; i != QUICLY_SEND_PN_SIZE; ++i)
-        //     s->dst_payload_from[i - QUICLY_SEND_PN_SIZE] ^= hpmask[i + 1];
+        ptls_cipher_encrypt_push(s->target.cipher->header_protection,
+                                 s->dst_payload_from - QUICLY_SEND_PN_SIZE + QUICLY_MAX_PN_SIZE, hpmask, hpmask, mask_size,
+                                 s->target.first_byte_at, s->dst_payload_from);
     }
 
     /* update CC, commit sentmap */
@@ -2669,7 +2674,8 @@ static int do_detect_loss(quicly_loss_t *ld, uint64_t largest_acked, uint32_t de
 
     init_acks_iter(conn, &iter);
 
-    /* Mark packets as lost if they are smaller than the largest_acked and outside either time-threshold or packet-threshold windows.
+    /* Mark packets as lost if they are smaller than the largest_acked and outside either time-threshold or packet-threshold
+     * windows.
      */
     while ((sent = quicly_sentmap_get(&iter))->packet_number < largest_acked &&
            (sent->sent_at <= now - delay_until_lost || /* time threshold */
@@ -3382,9 +3388,8 @@ static int handle_stream_frame(quicly_conn_t *conn, struct st_quicly_handle_payl
 
     if ((ret = quicly_decode_stream_frame(state->frame_type, &state->src, state->end, &frame)) != 0)
         return ret;
-    LOG_STREAM_EVENT(conn, frame.stream_id, QUICLY_EVENT_TYPE_QUICTRACE_RECV_STREAM,
-                     INT_EVENT_ATTR(OFFSET, frame.offset), INT_EVENT_ATTR(LENGTH, frame.data.len),
-                     INT_EVENT_ATTR(FIN, frame.is_fin));
+    LOG_STREAM_EVENT(conn, frame.stream_id, QUICLY_EVENT_TYPE_QUICTRACE_RECV_STREAM, INT_EVENT_ATTR(OFFSET, frame.offset),
+                     INT_EVENT_ATTR(LENGTH, frame.data.len), INT_EVENT_ATTR(FIN, frame.is_fin));
     if ((ret = get_stream_or_open_if_new(conn, frame.stream_id, &stream)) != 0 || stream == NULL)
         return ret;
     return apply_stream_frame(stream, &frame);
@@ -3824,8 +3829,7 @@ static int handle_transport_close_frame(quicly_conn_t *conn, struct st_quicly_ha
         return ret;
 
     LOG_CONNECTION_EVENT(conn, QUICLY_EVENT_TYPE_TRANSPORT_CLOSE_RECEIVE, INT_EVENT_ATTR(ERROR_CODE, frame.error_code),
-                         INT_EVENT_ATTR(FRAME_TYPE, (int64_t)frame.frame_type),
-                         VEC_EVENT_ATTR(REASON_PHRASE, frame.reason_phrase));
+                         INT_EVENT_ATTR(FRAME_TYPE, (int64_t)frame.frame_type), VEC_EVENT_ATTR(REASON_PHRASE, frame.reason_phrase));
     return handle_close(conn, QUICLY_ERROR_FROM_TRANSPORT_ERROR_CODE(frame.error_code), frame.frame_type, frame.reason_phrase);
 }
 
@@ -4346,7 +4350,8 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
             dispose_cipher(&ctx->conn->initial->cipher.egress);
             if ((ret = setup_initial_encryption(&ctx->conn->initial->cipher.ingress, &ctx->conn->initial->cipher.egress,
                                                 ctx->conn->super.ctx->tls->cipher_suites,
-                                                ptls_iovec_init(ctx->conn->super.peer.cid.cid, ctx->conn->super.peer.cid.len), 1)) != 0)
+                                                ptls_iovec_init(ctx->conn->super.peer.cid.cid, ctx->conn->super.peer.cid.len),
+                                                1)) != 0)
                 goto Exit;
 
             /* schedule retransmit */
@@ -4355,7 +4360,8 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
         } break;
         case QUICLY_PACKET_TYPE_INITIAL:
             fprintf(stderr, "QUICLY_PACKET_TYPE_INITIAL\n");
-            if (ctx->conn->initial == NULL || (ctx->header_protection = ctx->conn->initial->cipher.ingress.header_protection) == NULL) {
+            if (ctx->conn->initial == NULL ||
+                (ctx->header_protection = ctx->conn->initial->cipher.ingress.header_protection) == NULL) {
                 ret = QUICLY_ERROR_PACKET_IGNORED;
                 goto Exit;
             }
@@ -4371,7 +4377,8 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
             break;
         case QUICLY_PACKET_TYPE_HANDSHAKE:
             fprintf(stderr, "QUICLY_PACKET_TYPE_HANDSHAKE\n");
-            if (ctx->conn->handshake == NULL || (ctx->header_protection = ctx->conn->handshake->cipher.ingress.header_protection) == NULL) {
+            if (ctx->conn->handshake == NULL ||
+                (ctx->header_protection = ctx->conn->handshake->cipher.ingress.header_protection) == NULL) {
                 ret = QUICLY_ERROR_PACKET_IGNORED;
                 goto Exit;
             }
@@ -4411,7 +4418,8 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
         ctx->epoch = QUICLY_EPOCH_1RTT;
     }
 
-    if (decrypt_packet_begin(ctx->header_protection, ctx->aead, &(*ctx->space)->next_expected_packet_number, ctx->packet, &ctx->pn, ctx)) {
+    if (decrypt_packet_begin(ctx->header_protection, ctx->aead, &(*ctx->space)->next_expected_packet_number, ctx->packet, &ctx->pn,
+                             ctx)) {
         ret = QUICLY_ERROR_PACKET_IGNORED;
         goto Exit;
     }
@@ -4439,14 +4447,15 @@ Exit:
     return ret;
 }
 
-
 int quicly_receive_end(struct quicly_receive_ctx *ctx)
 {
     uint64_t offending_frame_type = QUICLY_FRAME_TYPE_PADDING;
     int is_ack_only;
     int ret;
 
-    if ((ctx->payload = decrypt_packet_end(ctx->header_protection, ctx->aead, &(*ctx->space)->next_expected_packet_number, ctx->packet, &ctx->pn, ctx)).base == NULL) {
+    if ((ctx->payload = decrypt_packet_end(ctx->header_protection, ctx->aead, &(*ctx->space)->next_expected_packet_number,
+                                           ctx->packet, &ctx->pn, ctx))
+            .base == NULL) {
         ret = QUICLY_ERROR_PACKET_IGNORED;
         goto Exit;
     }
@@ -4466,7 +4475,7 @@ int quicly_receive_end(struct quicly_receive_ctx *ctx)
     ctx->conn->super.stats.num_packets.received += 1;
     ctx->conn->super.stats.num_bytes.received += ctx->packet->octets.len;
 
-        /* state updates, that are triggered by the receipt of a packet */
+    /* state updates, that are triggered by the receipt of a packet */
     if (ctx->epoch == QUICLY_EPOCH_HANDSHAKE && ctx->conn->initial != NULL) {
         /* Discard Initial space before processing the payload of the Handshake packet to avoid the chance of an ACK frame included
          * in the Handshake packet setting a loss timer for the Initial packet. */
