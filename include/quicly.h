@@ -41,7 +41,7 @@ extern "C" {
 #include "quicly/maxsender.h"
 
 #ifndef QUICLY_DEBUG
-#define QUICLY_DEBUG 5
+#define QUICLY_DEBUG 0
 #endif
 
 /* invariants! */

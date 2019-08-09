@@ -1736,7 +1736,7 @@ static ptls_iovec_t decrypt_packet(ptls_cipher_context_t *header_protection, ptl
     *pn = quicly_determine_packet_number(pnbits, pnlen * 8, *next_expected_pn);
     size_t aead_off = packet->encrypted_off + pnlen, ptlen;
     if ((ptlen = ptls_aead_decrypt(aead[aead_index], packet->octets.base + aead_off, packet->octets.base + aead_off,
-                                        packet->octets.len - aead_off, *pn, packet->octets.base, aead_off)) == SIZE_MAX) {
+                                   packet->octets.len - aead_off, *pn, packet->octets.base, aead_off)) == SIZE_MAX) {
         if (QUICLY_DEBUG)
             fprintf(stderr, "%s: aead decryption failure (pn: %" PRIu64 ")\n", __FUNCTION__, *pn);
         goto Error;
@@ -1798,9 +1798,9 @@ static int decrypt_packet_begin(ptls_cipher_context_t *header_protection, ptls_a
     /* AEAD */
     *pn = quicly_determine_packet_number(pnbits, pnlen * 8, *next_expected_pn);
     rcv_ctx->aead_off = packet->encrypted_off + pnlen;
-    if ((rcv_ctx->ptlen =
-             ptls_aead_decrypt_push(aead[aead_index], packet->octets.base + rcv_ctx->aead_off, packet->octets.base + rcv_ctx->aead_off,
-                               packet->octets.len - rcv_ctx->aead_off, *pn, packet->octets.base, rcv_ctx->aead_off)) == SIZE_MAX) {
+    if ((rcv_ctx->ptlen = ptls_aead_decrypt_push(aead[aead_index], packet->octets.base + rcv_ctx->aead_off,
+                                                 packet->octets.base + rcv_ctx->aead_off, packet->octets.len - rcv_ctx->aead_off,
+                                                 *pn, packet->octets.base, rcv_ctx->aead_off)) == SIZE_MAX) {
         if (QUICLY_DEBUG)
             fprintf(stderr, "%s: aead decryption failure (pn: %" PRIu64 ")\n", __FUNCTION__, *pn);
         goto Error;
@@ -4302,14 +4302,16 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
     }
 
     if (QUICLY_PACKET_IS_LONG_HEADER(ctx->packet->octets.base[0])) {
-        fprintf(stderr, "QUICLY_PACKET_IS_LONG_HEADER\n");
+        if (QUICLY_DEBUG)
+            fprintf(stderr, "QUICLY_PACKET_IS_LONG_HEADER\n");
         if (ctx->conn->super.state == QUICLY_STATE_FIRSTFLIGHT) {
             if (ctx->packet->version == 0)
                 return handle_version_negotiation_packet(ctx->conn, ctx->packet);
         }
         switch (ctx->packet->octets.base[0] & QUICLY_PACKET_TYPE_BITMASK) {
         case QUICLY_PACKET_TYPE_RETRY: {
-            fprintf(stderr, "QUICLY_PACKET_TYPE_RETRY\n");
+            if (QUICLY_DEBUG)
+                fprintf(stderr, "QUICLY_PACKET_TYPE_RETRY\n");
             /* check the packet */
             if (ctx->packet->token.len >= QUICLY_MAX_TOKEN_LEN) {
                 ret = QUICLY_ERROR_PACKET_IGNORED;
@@ -4354,7 +4356,8 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
             goto Exit;
         } break;
         case QUICLY_PACKET_TYPE_INITIAL:
-            fprintf(stderr, "QUICLY_PACKET_TYPE_INITIAL\n");
+            if (QUICLY_DEBUG)
+                fprintf(stderr, "QUICLY_PACKET_TYPE_INITIAL\n");
             if (ctx->conn->initial == NULL ||
                 (ctx->header_protection = ctx->conn->initial->cipher.ingress.header_protection) == NULL) {
                 ret = QUICLY_ERROR_PACKET_IGNORED;
@@ -4371,7 +4374,8 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
             ctx->epoch = QUICLY_EPOCH_INITIAL;
             break;
         case QUICLY_PACKET_TYPE_HANDSHAKE:
-            fprintf(stderr, "QUICLY_PACKET_TYPE_HANDSHAKE\n");
+            if (QUICLY_DEBUG)
+                fprintf(stderr, "QUICLY_PACKET_TYPE_HANDSHAKE\n");
             if (ctx->conn->handshake == NULL ||
                 (ctx->header_protection = ctx->conn->handshake->cipher.ingress.header_protection) == NULL) {
                 ret = QUICLY_ERROR_PACKET_IGNORED;
@@ -4382,7 +4386,8 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
             ctx->epoch = QUICLY_EPOCH_HANDSHAKE;
             break;
         case QUICLY_PACKET_TYPE_0RTT:
-            fprintf(stderr, "QUICLY_PACKET_TYPE_0RTT\n");
+            if (QUICLY_DEBUG)
+                fprintf(stderr, "QUICLY_PACKET_TYPE_0RTT\n");
             if (quicly_is_client(ctx->conn)) {
                 ret = QUICLY_ERROR_PACKET_IGNORED;
                 goto Exit;
@@ -4401,7 +4406,8 @@ int quicly_receive_begin(struct quicly_receive_ctx *ctx)
             goto Exit;
         }
     } else {
-        fprintf(stderr, "SHORT_HEADER\n");
+        if (QUICLY_DEBUG)
+            fprintf(stderr, "SHORT_HEADER\n");
         /* first 1-RTT keys is key_phase 1, see doc-comment of cipher.ingress */
         if (ctx->conn->application == NULL ||
             (ctx->header_protection = ctx->conn->application->cipher.ingress.header_protection.one_rtt) == NULL) {
