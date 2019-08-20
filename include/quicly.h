@@ -54,6 +54,11 @@ extern "C" {
 #define QUICLY_STATELESS_RESET_TOKEN_LEN 16
 #define QUICLY_STATELESS_RESET_PACKET_MIN_LEN 39
 
+#define QUICLY_MAX_PN_SIZE 4  /* maximum defined by the RFC used for calculating header protection sampling offset */
+#define QUICLY_SEND_PN_SIZE 2 /* size of PN used for sending */
+
+#define QUICLY_KEY_PHASE_BIT 0x4
+
 typedef struct st_quicly_datagram_t {
     ptls_iovec_t data;
     socklen_t salen;
@@ -191,6 +196,9 @@ typedef struct st_quicly_context_t quicly_context_t;
 typedef struct st_quicly_conn_t quicly_conn_t;
 typedef struct st_quicly_stream_t quicly_stream_t;
 typedef struct st_quicly_send_context_t quicly_send_context_t;
+typedef struct st_quicly_receive_context_t quicly_receive_context_t;
+typedef struct st_quicly_decoded_packet_t quicly_decoded_packet_t;
+typedef struct st_quicly_pn_space_t quicly_pn_space_t; 
 
 #define QUICLY_CALLBACK_TYPE0(ret, name)                                                                                           \
     typedef struct st_quicly_##name##_t {                                                                                          \
@@ -209,6 +217,17 @@ typedef struct st_quicly_packet_allocator_t {
     quicly_datagram_t *(*alloc_packet)(struct st_quicly_packet_allocator_t *self, socklen_t salen, size_t payloadsize);
     void (*free_packet)(struct st_quicly_packet_allocator_t *self, quicly_datagram_t *packet);
 } quicly_packet_allocator_t;
+
+typedef struct st_quicly_crypto_codec_t {
+    size_t (*encrypt_packet)(struct st_quicly_crypto_codec_t *self, ptls_aead_context_t *aead, ptls_cipher_context_t *header_protection,
+                             uint8_t *dst, uint8_t *dst_payload_from, uint8_t *first_byte_at, uint64_t packet_number);
+    void (*encrypt_packet_done)(ptls_cipher_context_t *header_protection, uint8_t *first_byte_at, uint8_t *dst_payload_from);
+    int (*decrypt_packet)(struct st_quicly_crypto_codec_t *self, quicly_conn_t *conn, quicly_pn_space_t *space,
+                             ptls_cipher_context_t *header_protection, ptls_aead_context_t **aead, size_t epoch,
+                             uint64_t *next_expected_pn, quicly_decoded_packet_t *packet);
+    int (*decrypt_packet_done)(quicly_conn_t *conn, quicly_decoded_packet_t *packet, quicly_pn_space_t *space, size_t epoch, uint64_t pn,
+                                   size_t aead_off, size_t ptlen);
+} quicly_crypto_codec_t;
 
 /**
  * CID encryption
@@ -408,6 +427,10 @@ struct st_quicly_context_t {
          */
         quicly_event_logger_t *cb;
     } event_log;
+    /**
+     * quicly crypto codec
+     */
+    quicly_crypto_codec_t *crypto_codec;
 };
 
 /**
@@ -416,7 +439,7 @@ struct st_quicly_context_t {
 typedef enum {
     /**
      * before observing the first message from peer
-     */
+     */ 
     QUICLY_STATE_FIRSTFLIGHT,
     /**
      * while connected
@@ -662,7 +685,7 @@ struct st_quicly_stream_t {
     } _recv_aux;
 };
 
-typedef struct st_quicly_decoded_packet_t {
+struct st_quicly_decoded_packet_t {
     /**
      * octets of the entire packet
      */
@@ -715,7 +738,26 @@ typedef struct st_quicly_decoded_packet_t {
         QUICLY__DECODED_PACKET_CACHED_IS_STATELESS_RESET,
         QUICLY__DECODED_PACKET_CACHED_NOT_STATELESS_RESET
     } _is_stateless_reset_cached;
-} quicly_decoded_packet_t;
+};
+
+struct st_quicly_pn_space_t {
+    /**
+     * acks to be sent to peer
+     */
+    quicly_ranges_t ack_queue;
+    /**
+     * time at when the largest pn in the ack_queue has been received (or INT64_MAX if none)
+     */
+    int64_t largest_pn_received_at;
+    /**
+     *
+     */
+    uint64_t next_expected_packet_number;
+    /**
+     * packet count before ack is sent
+     */
+    uint32_t unacked_count;
+};
 
 /**
  *
