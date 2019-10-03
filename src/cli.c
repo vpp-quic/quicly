@@ -898,6 +898,8 @@ int main(int argc, char **argv)
     ctx.closed_by_peer = &closed_by_peer;
     ctx.save_resumption_token = &save_resumption_token;
     ctx.generate_resumption_token = &generate_resumption_token;
+    ctx.crypto_codec =
+        quicly_new_default_crypto_codec();
 
     setup_session_cache(ctx.tls);
     quicly_amend_ptls_context(ctx.tls);

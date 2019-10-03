@@ -48,6 +48,8 @@ quicly_cid_encryptor_t *quicly_new_default_cid_encryptor(ptls_cipher_algorithm_t
  *
  */
 void quicly_free_default_cid_encryptor(quicly_cid_encryptor_t *self);
+
+quicly_crypto_codec_t *quicly_new_default_crypto_codec();
 /**
  *
  */
