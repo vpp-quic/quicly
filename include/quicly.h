@@ -42,7 +42,7 @@ extern "C" {
 #include "quicly/maxsender.h"
 
 #ifndef QUICLY_DEBUG
-#define QUICLY_DEBUG 0
+#define QUICLY_DEBUG 5
 #endif
 
 /* invariants! */
@@ -61,6 +61,11 @@ typedef union st_quicly_address_t {
     struct sockaddr_in6 sin6;
 } quicly_address_t;
 
+#define QUICLY_MAX_PN_SIZE 4  /* maximum defined by the RFC used for calculating header protection sampling offset */
+#define QUICLY_SEND_PN_SIZE 2 /* size of PN used for sending */
+
+#define QUICLY_KEY_PHASE_BIT 0x4
+
 typedef struct st_quicly_datagram_t {
     ptls_iovec_t data;
     quicly_address_t dest, src;
@@ -73,6 +78,9 @@ typedef struct st_quicly_conn_t quicly_conn_t;
 typedef struct st_quicly_stream_t quicly_stream_t;
 typedef struct st_quicly_send_context_t quicly_send_context_t;
 typedef struct st_quicly_address_token_plaintext_t quicly_address_token_plaintext_t;
+typedef struct st_quicly_receive_context_t quicly_receive_context_t;
+typedef struct st_quicly_decoded_packet_t quicly_decoded_packet_t;
+typedef struct st_quicly_pn_space_t quicly_pn_space_t;
 
 #define QUICLY_CALLBACK_TYPE0(ret, name)                                                                                           \
     typedef struct st_quicly_##name##_t {                                                                                          \
@@ -91,6 +99,19 @@ typedef struct st_quicly_packet_allocator_t {
     quicly_datagram_t *(*alloc_packet)(struct st_quicly_packet_allocator_t *self, size_t payloadsize);
     void (*free_packet)(struct st_quicly_packet_allocator_t *self, quicly_datagram_t *packet);
 } quicly_packet_allocator_t;
+
+typedef struct st_quicly_crypto_codec_t {
+    size_t (*encrypt_packet)(struct st_quicly_crypto_codec_t *self, ptls_aead_context_t *aead,
+                             ptls_cipher_context_t *header_protection, uint8_t *dst, uint8_t *dst_payload_from,
+                             uint8_t *first_byte_at, uint64_t packet_number, quicly_datagram_t *packet);
+    // void (*encrypt_packet_done)(ptls_cipher_context_t *header_protection, uint8_t *dst_payload_from, uint8_t *first_byte_at);
+    int (*decrypt_packet)(struct st_quicly_crypto_codec_t *self, quicly_conn_t *conn, struct sockaddr *dest_addr,
+                          struct sockaddr *src_addr, quicly_pn_space_t *space, ptls_cipher_context_t *header_protection,
+                          ptls_aead_context_t **aead, size_t epoch, uint64_t *next_expected_pn, quicly_decoded_packet_t *packet);
+    //  int (*decrypt_packet_done)(quicly_conn_t *conn, struct sockaddr *dest_addr, struct sockaddr *src_addr,
+    //  quicly_decoded_packet_t *packet,
+    //                            quicly_pn_space_t *space, size_t epoch, uint64_t pn, size_t aead_off, size_t ptlen);
+} quicly_crypto_codec_t;
 
 /**
  * CID encryption
@@ -157,6 +178,9 @@ QUICLY_CALLBACK_TYPE(int, save_resumption_token, quicly_conn_t *conn, ptls_iovec
  */
 QUICLY_CALLBACK_TYPE(int, generate_resumption_token, quicly_conn_t *conn, ptls_buffer_t *buf,
                      quicly_address_token_plaintext_t *token);
+
+QUICLY_CALLBACK_TYPE(void, finalize_send_packet, quicly_conn_t *conn, ptls_cipher_context_t *hp, ptls_aead_context_t *aead,
+                     quicly_datagram_t *packet, uint8_t *payload_from, uint8_t *first_byte_at, int coalesced);
 
 typedef struct st_quicly_max_stream_data_t {
     uint64_t bidi_local, bidi_remote, uni;
@@ -292,6 +316,14 @@ struct st_quicly_context_t {
      *
      */
     quicly_generate_resumption_token_t *generate_resumption_token;
+    /**
+     * optional callback for encryption offloading
+     */
+    quicly_finalize_send_packet_t *finalize_send_packet;
+    /**
+     * quicly crypto codec
+     */
+    quicly_crypto_codec_t *crypto_codec;
 };
 
 /**
@@ -552,7 +584,7 @@ struct st_quicly_stream_t {
     } _recv_aux;
 };
 
-typedef struct st_quicly_decoded_packet_t {
+struct st_quicly_decoded_packet_t {
     /**
      * octets of the entire packet
      */
@@ -593,13 +625,17 @@ typedef struct st_quicly_decoded_packet_t {
     ptls_iovec_t token;
     /**
      * starting offset of data (i.e., version-dependent area of a long header packet (version numbers in case of VN), odcid (in case
-     * of retry), or encrypted PN)
+     * of retry), or encrypted PN (if decrypted_pn is UINT64_MAX) or data (if decrypted_pn is not UINT64_MAX))
      */
     size_t encrypted_off;
     /**
      * size of the datagram
      */
     size_t datagram_size;
+    /**
+     * if not UINT64_MAX, indicates that the packet has been decrypted prior to being passed to `quicly_receive`.
+     */
+    uint64_t decrypted_pn;
     /**
      *
      */
@@ -608,7 +644,26 @@ typedef struct st_quicly_decoded_packet_t {
         QUICLY__DECODED_PACKET_CACHED_IS_STATELESS_RESET,
         QUICLY__DECODED_PACKET_CACHED_NOT_STATELESS_RESET
     } _is_stateless_reset_cached;
-} quicly_decoded_packet_t;
+};
+
+struct st_quicly_pn_space_t {
+    /**
+     * acks to be sent to peer
+     */
+    quicly_ranges_t ack_queue;
+    /**
+     * time at when the largest pn in the ack_queue has been received (or INT64_MAX if none)
+     */
+    int64_t largest_pn_received_at;
+    /**
+     *
+     */
+    uint64_t next_expected_packet_number;
+    /**
+     * packet count before ack is sent
+     */
+    uint32_t unacked_count;
+};
 
 struct st_quicly_address_token_plaintext_t {
     int is_retry;
@@ -666,9 +721,11 @@ static const quicly_transport_parameters_t *quicly_get_peer_transport_parameters
  *
  */
 static quicly_state_t quicly_get_state(quicly_conn_t *conn);
-/**
- *
- */
+
+ptls_cipher_context_t *quicly_get_conn_cipher_context(quicly_conn_t *conn);
+ptls_aead_context_t **quicly_get_conn_aead_context(quicly_conn_t *conn);
+struct st_quicly_pn_space_t **quicly_get_conn_pn_space(quicly_conn_t *conn);
+
 int quicly_connection_is_ready(quicly_conn_t *conn);
 /**
  *
