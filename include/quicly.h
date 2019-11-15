@@ -42,8 +42,12 @@ extern "C" {
 #include "quicly/maxsender.h"
 
 #ifndef QUICLY_DEBUG
-#define QUICLY_DEBUG 5
+#define QUICLY_DEBUG 0
 #endif
+
+//#define QUICLY_USE_EMBEDDED_PROBES
+
+
 
 /* invariants! */
 #define QUICLY_LONG_HEADER_BIT 0x80
@@ -628,6 +632,7 @@ struct st_quicly_decoded_packet_t {
      * of retry), or encrypted PN (if decrypted_pn is UINT64_MAX) or data (if decrypted_pn is not UINT64_MAX))
      */
     size_t encrypted_off;
+
     /**
      * size of the datagram
      */
@@ -1090,6 +1095,10 @@ inline void quicly_byte_to_hex(char *dst, uint8_t v)
     dst[0] = "0123456789abcdef"[v >> 4];
     dst[1] = "0123456789abcdef"[v & 0xf];
 }
+
+
+ptls_iovec_t do_decrypt_packet(ptls_cipher_context_t *header_protection, ptls_aead_context_t **aead,
+                                      uint64_t next_expected_pn, quicly_decoded_packet_t *packet, uint64_t *pn);
 
 #ifdef __cplusplus
 }

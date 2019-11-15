@@ -35,11 +35,13 @@
 #include "quicly/frame.h"
 #include "quicly/streambuf.h"
 #include "quicly/cc.h"
-#if QUICLY_USE_EMBEDDED_PROBES
+
+
+//#if QUICLY_USE_EMBEDDED_PROBES
 #include "embedded-probes.h"
-#elif QUICLY_USE_DTRACE
-#include "quicly-probes.h"
-#endif
+//#elif QUICLY_USE_DTRACE
+//#include "quicly-probes.h"
+//#endif
 
 #define QUICLY_QUIC_BIT 0x40
 #define QUICLY_LONG_HEADER_RESERVED_BITS 0xc
@@ -88,28 +90,30 @@
 
 KHASH_MAP_INIT_INT64(quicly_stream_t, quicly_stream_t *)
 
-#if QUICLY_USE_EMBEDDED_PROBES || QUICLY_USE_DTRACE
-#define QUICLY_PROBE(label, conn, ...)                                                                                             \
-    do {                                                                                                                           \
-        quicly_conn_t *_conn = (conn);                                                                                             \
-        if (PTLS_UNLIKELY(QUICLY_##label##_ENABLED()) && !ptls_skip_tracing(_conn->crypto.tls))                                    \
-            QUICLY_##label(_conn, __VA_ARGS__);                                                                                    \
-    } while (0)
-#define QUICLY_PROBE_HEXDUMP(s, l)                                                                                                 \
-    ({                                                                                                                             \
-        size_t _l = (l);                                                                                                           \
-        ptls_hexdump(alloca(_l * 2 + 1), (s), _l);                                                                                 \
-    })
-#define QUICLY_PROBE_ESCAPE_UNSAFE_STRING(s, l)                                                                                    \
-    ({                                                                                                                             \
-        size_t _l = (l);                                                                                                           \
-        quicly_escape_unsafe_string(alloca(_l * 4 + 1), (s), _l);                                                                  \
-    })
-#else
-#define QUICLY_PROBE(label, conn, ...)
+//#define QUICLY_USE_EMBEDDED_PROBES
+
+//#if QUICLY_USE_EMBEDDED_PROBES || QUICLY_USE_DTRACE
+// #define QUICLY_PROBE(label, conn, ...)                                                                                             \
+//     do {                                                                                                                           \
+//         quicly_conn_t *_conn = (conn);                                                                                             \
+//         if (PTLS_UNLIKELY(QUICLY_##label##_ENABLED()) && !ptls_skip_tracing(_conn->crypto.tls))                                    \
+//             QUICLY_##label(_conn, __VA_ARGS__);                                                                                    \
+//     } while (0)
+// #define QUICLY_PROBE_HEXDUMP(s, l)                                                                                                 \
+//     ({                                                                                                                             \
+//         size_t _l = (l);                                                                                                           \
+//         ptls_hexdump(alloca(_l * 2 + 1), (s), _l);                                                                                 \
+//     })
+// #define QUICLY_PROBE_ESCAPE_UNSAFE_STRING(s, l)                                                                                    \
+//     ({                                                                                                                             \
+//         size_t _l = (l);                                                                                                           \
+//         quicly_escape_unsafe_string(alloca(_l * 4 + 1), (s), _l);                                                                  \
+//     })
+// #else
+ #define QUICLY_PROBE(label, conn, ...)
 #define QUICLY_PROBE_HEXDUMP(s, l)
-#define QUICLY_PROBE_ESCAPE_UNSAFE_STRING(s, l)
-#endif
+ #define QUICLY_PROBE_ESCAPE_UNSAFE_STRING(s, l)
+// #endif
 
 struct st_quicly_cipher_context_t {
     ptls_aead_context_t *aead;
@@ -1743,7 +1747,7 @@ Exit:
     return ret;
 }
 
-static ptls_iovec_t do_decrypt_packet(ptls_cipher_context_t *header_protection, ptls_aead_context_t **aead,
+ptls_iovec_t do_decrypt_packet(ptls_cipher_context_t *header_protection, ptls_aead_context_t **aead,
                                       uint64_t next_expected_pn, quicly_decoded_packet_t *packet, uint64_t *pn)
 {
     size_t encrypted_len = packet->octets.len - packet->encrypted_off;
@@ -1775,6 +1779,7 @@ static ptls_iovec_t do_decrypt_packet(ptls_cipher_context_t *header_protection, 
 
     /* AEAD */
     *pn = quicly_determine_packet_number(pnbits, pnlen * 8, next_expected_pn);
+
     size_t aead_off = packet->encrypted_off + pnlen, ptlen;
     if ((ptlen = ptls_aead_decrypt(aead[aead_index], packet->octets.base + aead_off, packet->octets.base + aead_off,
                                    packet->octets.len - aead_off, *pn, packet->octets.base, aead_off)) == SIZE_MAX) {
@@ -1787,8 +1792,6 @@ static ptls_iovec_t do_decrypt_packet(ptls_cipher_context_t *header_protection, 
         fprintf(stderr, "%s: AEAD payload:\n%s", __FUNCTION__, payload_hex);
         free(payload_hex);
     }
-
-    fprintf(stderr, "ptls_iovec_init    ptlen %ld \n\r", ptlen);
 
     return ptls_iovec_init(packet->octets.base + aead_off, ptlen);
 
@@ -1803,14 +1806,10 @@ static ptls_iovec_t decrypt_packet(ptls_cipher_context_t *header_protection, ptl
 
     /* decrypt ourselves, or use the pre-decrypted input */
     if (packet->decrypted_pn == UINT64_MAX) {
-        fprintf(stderr, "%s packet->encrypted_off %d  packet->octets.len %d", __FUNCTION__, packet->encrypted_off,
-                packet->octets.len);
-
+        
         if ((payload = do_decrypt_packet(header_protection, aead, *next_expected_pn, packet, pn)).base == NULL)
             goto Error;
     } else {
-        fprintf(stderr, "%s packet->encrypted_off %d  packet->octets.len %d", __FUNCTION__, packet->encrypted_off,
-                packet->octets.len);
         payload = ptls_iovec_init(packet->octets.base + packet->encrypted_off, packet->octets.len - packet->encrypted_off);
         *pn = packet->decrypted_pn;
 
@@ -1822,8 +1821,6 @@ static ptls_iovec_t decrypt_packet(ptls_cipher_context_t *header_protection, ptl
         }
     }
 
-    fprintf(stderr, "%s : header_protection %p    /   aead %p  /  pn %ld \n\r", __FUNCTION__, header_protection, aead, *pn);
-    fprintf(stderr, "%s : packet %p packet->encrypted_off %ld", __FUNCTION__, packet, packet->encrypted_off);
     /* check reserved bits after AEAD decryption */
     if ((packet->octets.base[0] & (QUICLY_PACKET_IS_LONG_HEADER(packet->octets.base[0]) ? QUICLY_LONG_HEADER_RESERVED_BITS
                                                                                         : QUICLY_SHORT_HEADER_RESERVED_BITS)) !=
@@ -2194,11 +2191,11 @@ static int commit_send_packet(quicly_conn_t *conn, quicly_send_context_t *s, int
     }
     quicly_encode16(s->dst_payload_from - QUICLY_SEND_PN_SIZE, (uint16_t)conn->egress.packet_number);
 
-    // s->dst = s->dst_payload_from + ptls_aead_encrypt(s->target.cipher->aead, s->dst_payload_from, s->dst_payload_from, s->dst -
-    // s->dst_payload_from, conn->egress.packet_number, s->target.first_byte_at, s->dst_payload_from - s->target.first_byte_at);
-    s->dst = s->dst_payload_from + conn->crypto_codec->encrypt_packet(
-                                       conn->crypto_codec, s->target.cipher->aead, s->target.cipher->header_protection, s->dst,
-                                       s->dst_payload_from, s->target.first_byte_at, conn->egress.packet_number, s->target.packet);
+     s->dst = s->dst_payload_from + ptls_aead_encrypt(s->target.cipher->aead, s->dst_payload_from, s->dst_payload_from, s->dst -
+     s->dst_payload_from, conn->egress.packet_number, s->target.first_byte_at, s->dst_payload_from - s->target.first_byte_at);
+    //s->dst = s->dst_payload_from + conn->crypto_codec->encrypt_packet(
+     //                                  conn->crypto_codec, s->target.cipher->aead, s->target.cipher->header_protection, s->dst,
+      //                                 s->dst_payload_from, s->target.first_byte_at, conn->egress.packet_number, s->target.packet);
 
     s->target.packet->data.len = s->dst - s->target.packet->data.base;
     assert(s->target.packet->data.len <= conn->super.ctx->max_packet_size);
@@ -4183,7 +4180,6 @@ int quicly_receive(quicly_conn_t *conn, struct sockaddr *dest_addr, struct socka
                  packet->octets.base, packet->octets.len);
 
     if (is_stateless_reset(conn, packet)) {
-        fprintf(stderr, "%s : is_stateless_reset \n\r", __FUNCTION__);
         ret = handle_stateless_reset(conn);
         goto Exit;
     }
@@ -4645,6 +4641,9 @@ int quicly_encrypt_address_token(void (*random_bytes)(void *, size_t), ptls_aead
     /* encrypt, abusing the internal API to supply full IV */
     if ((ret = ptls_buffer_reserve(buf, aead->algo->tag_size)) != 0)
         goto Exit;
+
+
+    fprintf(stderr, "PLOP\n\r");
     aead->do_encrypt_init(aead, buf->base + enc_start - aead->algo->iv_size, buf->base + start_off, enc_start - start_off);
     ptls_aead_encrypt_update(aead, buf->base + enc_start, buf->base + enc_start, buf->off - enc_start);
     ptls_aead_encrypt_final(aead, buf->base + buf->off);
