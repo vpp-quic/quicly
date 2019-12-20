@@ -782,6 +782,9 @@ void quicly_get_max_data(quicly_conn_t *conn, uint64_t *send_permitted, uint64_t
  *
  */
 static void **quicly_get_data(quicly_conn_t *conn);
+
+uint64_t quicly_get_next_expedcted_packet_number(quicly_conn_t *conn);
+
 /**
  * destroys a connection object.
  */
