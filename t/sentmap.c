@@ -76,7 +76,7 @@ void test_sentmap(void)
             quicly_sentmap_skip(&iter);
         }
     }
-    ok(quicly_sentmap_get(&iter) == NULL);
+    ok(quicly_sentmap_get(&iter)->packet_number == UINT64_MAX);
    // ok(num_blocks(&map) == 150 / 16 + 1);
 
     /* pop acks between 11 <= packet_number <= 40 */

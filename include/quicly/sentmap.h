@@ -32,8 +32,9 @@ extern "C" {
 #include "quicly/maxsender.h"
 #include "quicly/sendstate.h"
 
-#define SENTMAP_FRAMES_PER_PACKET   64
 
+/* TODO make this a smaller default and allow growing */
+#define SENTMAP_FRAMES_PER_PACKET   32
 
 struct st_quicly_conn_t;
 
@@ -96,7 +97,6 @@ struct st_quicly_sent_frame_t {
 
 
 struct st_quicly_sent_packet_t {
-    quicly_sent_packet_t *next;
     /**
      *
      */
@@ -105,14 +105,6 @@ struct st_quicly_sent_packet_t {
      *
      */
     int64_t sent_at;
-    /**
-     * epoch to be acked in
-     */
-    uint8_t ack_epoch;
-    /**
-     *
-     */
-    uint8_t ack_eliciting : 1;
     /**
      * number of bytes in-flight for the packet (becomes zero once deemed lost)
      */
@@ -125,6 +117,14 @@ struct st_quicly_sent_packet_t {
      * number of used frame slots
      */
     uint16_t used_frames;
+    /**
+     * epoch to be acked in
+     */
+    uint8_t ack_epoch;
+    /**
+     *
+     */
+    uint8_t ack_eliciting : 1;
     /**
      * variable length array of frames composing the packet
      */
@@ -154,10 +154,6 @@ struct st_quicly_sent_packet_t {
  */
 typedef struct st_quicly_sentmap_t {
     /**
-     * the linked list includes entries that are deemed lost (up to 3*SRTT) as well
-     */
-    struct st_quicly_sent_packet_t *head, *tail;
-    /**
      * bytes in-flight
      */
     size_t bytes_in_flight;
@@ -166,11 +162,16 @@ typedef struct st_quicly_sentmap_t {
      */
     uint8_t is_open;
 
-    quicly_sent_packet_t last;
+    uint64_t packet_id_offset;
+    uint64_t ring_size;
+    uint64_t first_packet;
+    uint64_t last_packet;
+    quicly_sent_packet_t **packet_ring;
 } quicly_sentmap_t;
 
 typedef struct st_quicly_sentmap_iter_t {
-    quicly_sent_packet_t *p;
+    uint64_t packet_id;
+    quicly_sentmap_t *map;
 } quicly_sentmap_iter_t;
 
 
@@ -178,14 +179,15 @@ extern quicly_sent_packet_t sentmap_packet__end;
 
 static inline int8_t quicly_sentmap_iter_is_end(quicly_sentmap_iter_t *iter)
 {
-    return iter->p == &sentmap_packet__end;
+    return iter->packet_id > iter->map->last_packet;
 }
-
 
 static inline const quicly_sent_packet_t *quicly_sentmap_get(quicly_sentmap_iter_t *iter)
 {
-    assert(iter->p);
-    return iter->p;
+    //if (iter->map->first_packet <= iter->packet_id && iter->packet_id <= iter->map->last_packet)
+    if (!quicly_sentmap_iter_is_end(iter))
+        return iter->map->packet_ring[iter->packet_id % iter->map->ring_size];
+    return &sentmap_packet__end;
 }
 
 static inline int quicly_sentmap_is_open(quicly_sentmap_t *map)
@@ -195,18 +197,22 @@ static inline int quicly_sentmap_is_open(quicly_sentmap_t *map)
 
 static inline void quicly_sentmap_init_iter(quicly_sentmap_t *map, quicly_sentmap_iter_t *iter)
 {
-    iter->p = map->head;
-    if (iter->p == NULL) {
-        iter->p = &sentmap_packet__end;
-    }
+    iter->packet_id = map->first_packet;
+    iter->map = map;
 }
 
 static inline void quicly_sentmap_skip(quicly_sentmap_iter_t *iter)
 {
-    iter->p = iter->p->next;
-    if (iter->p == NULL) {
-        iter->p = &sentmap_packet__end;
-    }
+    do {
+        iter->packet_id ++;
+    } while (iter->packet_id <= iter->map->last_packet && !quicly_sentmap_get(iter));
+}
+
+static inline void quicly_sentmap_iter_advance(quicly_sentmap_iter_t *iter, uint64_t packet_number_to)
+{
+    iter->packet_id = packet_number_to;
+    if (!quicly_sentmap_get(iter))
+        quicly_sentmap_skip(iter);  /* If packet with given PN is not found, advance to next valid packet */
 }
 
 /**

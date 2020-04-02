@@ -2910,8 +2910,9 @@ static int mark_packets_as_lost(quicly_conn_t *conn, size_t count)
 
     init_acks_iter(conn, &iter);
 
-    while (quicly_sentmap_get(&iter)->packet_number < conn->egress.max_lost_pn)
-        quicly_sentmap_skip(&iter);
+    //while (quicly_sentmap_get(&iter)->packet_number < conn->egress.max_lost_pn)
+    //    quicly_sentmap_skip(&iter);
+    quicly_sentmap_iter_advance(&iter, conn->egress.max_lost_pn);
 
     do {
         const quicly_sent_packet_t *sent = quicly_sentmap_get(&iter);
@@ -3885,8 +3886,9 @@ static int handle_ack_frame(quicly_conn_t *conn, struct st_quicly_handle_payload
         uint64_t block_length = frame.ack_block_lengths[gap_index];
         if (block_length != 0) {
             QUICLY_PROBE(QUICTRACE_RECV_ACK, conn, probe_now(), packet_number, packet_number + block_length - 1);
-            while (quicly_sentmap_get(&iter)->packet_number < packet_number)
-                quicly_sentmap_skip(&iter);
+            //while (quicly_sentmap_get(&iter)->packet_number < packet_number)
+            //    quicly_sentmap_skip(&iter);
+            quicly_sentmap_iter_advance(&iter, packet_number);
             do {
                 const quicly_sent_packet_t *sent;
                 if ((sent = quicly_sentmap_get(&iter))->packet_number == packet_number) {
