@@ -181,6 +181,34 @@ static inline int8_t quicly_sentmap_iter_is_end(quicly_sentmap_iter_t *iter)
     return iter->p == &sentmap_packet__end;
 }
 
+
+static inline const quicly_sent_packet_t *quicly_sentmap_get(quicly_sentmap_iter_t *iter)
+{
+    assert(iter->p);
+    return iter->p;
+}
+
+static inline int quicly_sentmap_is_open(quicly_sentmap_t *map)
+{
+    return map->is_open;
+}
+
+static inline void quicly_sentmap_init_iter(quicly_sentmap_t *map, quicly_sentmap_iter_t *iter)
+{
+    iter->p = map->head;
+    if (iter->p == NULL) {
+        iter->p = &sentmap_packet__end;
+    }
+}
+
+static inline void quicly_sentmap_skip(quicly_sentmap_iter_t *iter)
+{
+    iter->p = iter->p->next;
+    if (iter->p == NULL) {
+        iter->p = &sentmap_packet__end;
+    }
+}
+
 /**
  * initializes the sentmap
  */
@@ -210,22 +238,20 @@ quicly_sent_frame_t *quicly_sentmap_allocate_frame(quicly_sentmap_t *map, quicly
 /**
  * initializes the iterator
  */
-void quicly_sentmap_init_iter(quicly_sentmap_t *map, quicly_sentmap_iter_t *iter);
+//void quicly_sentmap_init_iter(quicly_sentmap_t *map, quicly_sentmap_iter_t *iter);
 /**
  * returns the current packet pointed to by the iterator
  */
-const quicly_sent_packet_t *quicly_sentmap_get(quicly_sentmap_iter_t *iter);
+//const quicly_sent_packet_t *quicly_sentmap_get(quicly_sentmap_iter_t *iter);
 /**
  * advances the iterator to the next packet
  */
-void quicly_sentmap_skip(quicly_sentmap_iter_t *iter);
+//void quicly_sentmap_skip(quicly_sentmap_iter_t *iter);
 /**
  * updates the state of the packet being pointed to by the iterator, _and advances to the next packet_
  */
 int quicly_sentmap_update(quicly_sentmap_t *map, quicly_sentmap_iter_t *iter, quicly_sentmap_event_t event,
                           struct st_quicly_conn_t *conn);
-
-/* inline definitions */
 
 
 

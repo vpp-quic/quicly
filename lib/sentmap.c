@@ -25,18 +25,14 @@
 #include "quicly/sentmap.h"
 
 
- quicly_sent_packet_t sentmap_packet__end = {
+quicly_sent_packet_t sentmap_packet__end = {
     NULL, UINT64_MAX, INT64_MAX
- };
+};
+
 
 void quicly_sentmap_init(quicly_sentmap_t *map)
 {
     *map = (quicly_sentmap_t){NULL};
-}
-
-int quicly_sentmap_is_open(quicly_sentmap_t *map)
-{
-    return map->is_open;
 }
 
 void quicly_sentmap_commit(quicly_sentmap_t *map, uint16_t bytes_in_flight)
@@ -61,20 +57,6 @@ quicly_sent_frame_t *quicly_sentmap_allocate_frame(quicly_sentmap_t *map, quicly
     p->used_frames ++;
     frame->acked = acked;
     return frame;
-}
-
-void quicly_sentmap_init_iter(quicly_sentmap_t *map, quicly_sentmap_iter_t *iter)
-{
-    iter->p = map->head;
-    if (iter->p == NULL) {
-        iter->p = &sentmap_packet__end;
-    }
-}
-
-const quicly_sent_packet_t *quicly_sentmap_get(quicly_sentmap_iter_t *iter)
-{
-    assert(iter->p);
-    return iter->p;
 }
 
 static inline quicly_sent_packet_t *allocate_packet()
@@ -107,21 +89,6 @@ int quicly_sentmap_prepare(quicly_sentmap_t *map, uint64_t packet_number, int64_
     map->is_open = 1;
     return 0;
 }
-
-
-void quicly_sentmap_skip(quicly_sentmap_iter_t *iter)
-{
-    iter->p = iter->p->next;
-    if (iter->p == NULL) {
-        iter->p = &sentmap_packet__end;
-    }
-}
-
-// static void discard_packet(quicly_sent_packet_t *p)
-// {
-//     assert(!p->discarded);
-//     p->discarded = 1;
-// }
 
 static void discard_packet(quicly_sentmap_t *map, quicly_sent_packet_t *packet)
 {
