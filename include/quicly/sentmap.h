@@ -102,6 +102,10 @@ struct st_quicly_sent_packet_t {
     /**
      *
      */
+    struct st_quicly_sent_packet_t *next_free_packet;
+    /**
+     *
+     */
     uint64_t packet_number;
     /**
      *
@@ -163,10 +167,13 @@ typedef struct st_quicly_sentmap_t {
      */
     size_t bytes_in_flight;
     /**
+     * free packet list
+     */
+    quicly_sent_packet_t *free_packet;
+    /**
      * whether a new packet has been allocated and frames can be added to it
      */
     uint8_t is_open;
-
 } quicly_sentmap_t;
 
 typedef struct st_quicly_sentmap_iter_t {
