@@ -66,5 +66,5 @@ Do a new vpp-quicly release
 1. Sync the fork with h2o/quicly
 2. Clone repo and `git submodule update --init --recursive`
 3. Push new commit with `include/quicly/version.h`
-4. Archive repo `git archive --format=tar.gz --prefix=quicly_<version>-vpp/ -o quicly_<version>-vpp.tar.gz HEAD`
+4. Archive repo `git ls-files --recurse-submodules | tar czf quicly_0.1.x-vpp.tar.gz --transform 's|^|quicly_0.1.x-vpp/|' -T-`
 5. Create new release/tag and upload archive as another binary artifact
